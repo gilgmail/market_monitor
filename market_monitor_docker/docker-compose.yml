@@ -10,6 +10,6 @@ services:
       - TICKERS=NVDA,SMCI,QQQ
       - NEWS_PER_TICKER=12
     ports:
-      - "8088:8088"
+      - "8090:8088"
     volumes:
       - ./app/data:/app/data
