@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>市場監控面板 — NVDA / SMCI / QQQ</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="hd">
+  <h1>市場監控面板 <span>NVDA / SMCI / QQQ</span></h1>
+  <div class="updated" id="updated">載入中…</div>
+</header>
+<main id="app"></main>
+<footer class="ft">
+  由 FastAPI 提供資料，背景每 <strong id="interval">—</strong> 分鐘更新。資料源：yfinance、Google News RSS。
+</footer>
+<script>
+async function loadData() {
+  try {
+    const res = await fetch('/data/dashboard.json?_=' + Date.now());
+    const data = await res.json();
+    document.getElementById('updated').textContent = '最後更新：' + (data.generated_at_local || '—');
+    document.getElementById('interval').textContent = (data.meta && data.meta.interval_min) ? data.meta.interval_min : '—';
+    const app = document.getElementById('app');
+    app.innerHTML = '';
+    const order = Object.keys(data.tickers || {});
+    for (const tk of order) {
+      const d = data.tickers[tk];
+      const px = d.price && d.price.price != null ? d.price.price.toLocaleString() : '—';
+      const curr = d.price && d.price.currency ? d.price.currency : '';
+      const ex = d.price && d.price.exchange ? d.price.exchange : '';
+      const card = document.createElement('section');
+      card.className = 'card';
+      card.innerHTML = `
+        <div class="row">
+          <h2>${tk}</h2>
+          <div class="ex">${ex}</div>
+        </div>
+        <div class="price">${px}<span class="ccy">${curr}</span></div>
+        <ul class="news">
+          ${(d.news||[]).map(n => `
+            <li>
+              <a href="${n.link}" target="_blank" rel="noopener noreferrer">${n.title}</a>
+              <div class="hint">${n.published || ''}</div>
+            </li>
+          `).join('')}
+        </ul>
+      `;
+      app.appendChild(card);
+    }
+  } catch (e) {
+    document.getElementById('updated').textContent = '載入失敗：' + e;
+  }
+}
+loadData();
+setInterval(loadData, 60000);
+</script>
+</body>
+</html>

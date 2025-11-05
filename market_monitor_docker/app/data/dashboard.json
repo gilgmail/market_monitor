@@ -1,0 +1,37 @@
+{
+  "generated_at_unix": 1762315608,
+  "generated_at_local": "2025-11-05 04:06:48",
+  "tickers": {
+    "NVDA": {
+      "price": {
+        "ticker": "NVDA",
+        "price": null,
+        "currency": "USD",
+        "exchange": null
+      },
+      "news": []
+    },
+    "SMCI": {
+      "price": {
+        "ticker": "SMCI",
+        "price": null,
+        "currency": "USD",
+        "exchange": null
+      },
+      "news": []
+    },
+    "QQQ": {
+      "price": {
+        "ticker": "QQQ",
+        "price": null,
+        "currency": "USD",
+        "exchange": null
+      },
+      "news": []
+    }
+  },
+  "meta": {
+    "interval_min": 10,
+    "tz": "Asia/Taipei"
+  }
+}
