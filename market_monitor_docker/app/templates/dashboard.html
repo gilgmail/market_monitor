@@ -4,40 +4,104 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>市場監控面板 — NVDA / SMCI / QQQ</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="static/style.css">
 </head>
 <body>
 <header class="hd">
   <h1>市場監控面板 <span>NVDA / SMCI / QQQ</span></h1>
-  <div class="updated" id="updated">載入中…</div>
+  <div class="header-info">
+    <div class="updated" id="updated">載入中…</div>
+    <button class="refresh-btn" id="refreshBtn" onclick="manualRefresh()" title="手動更新">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M13.65 2.35C12.2 0.9 10.21 0 8 0 3.58 0 0.01 3.58 0.01 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L9 7h7V0l-2.35 2.35z"/>
+      </svg>
+    </button>
+  </div>
+  <div class="countdown-bar">
+    <div class="countdown-progress" id="countdownProgress"></div>
+  </div>
+  <div class="next-update" id="nextUpdate">下次更新：計算中…</div>
 </header>
-<main id="app"></main>
+<main id="app" class="loading">
+  <div class="spinner"></div>
+</main>
 <footer class="ft">
-  由 FastAPI 提供資料，背景每 <strong id="interval">—</strong> 分鐘更新。資料源：yfinance、Google News RSS。
+  由 FastAPI 提供資料，背景每 <strong>10</strong> 分鐘更新。資料源：yfinance、Google News RSS。
 </footer>
 <script>
-async function loadData() {
+const basePath = window.location.pathname.replace(/\/$/, '');
+const INTERVAL_MS = 600000; // 10 minutes
+let nextUpdateTime = null;
+let countdownInterval = null;
+let previousData = {};
+
+function updateCountdown() {
+  if (!nextUpdateTime) return;
+  const now = Date.now();
+  const remaining = Math.max(0, nextUpdateTime - now);
+  const seconds = Math.floor(remaining / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+
+  document.getElementById('nextUpdate').textContent =
+    `下次更新：${minutes}:${secs.toString().padStart(2, '0')}`;
+
+  const progress = ((INTERVAL_MS - remaining) / INTERVAL_MS) * 100;
+  document.getElementById('countdownProgress').style.width = `${progress}%`;
+
+  if (remaining === 0) {
+    clearInterval(countdownInterval);
+  }
+}
+
+async function loadData(isManual = false) {
+  const app = document.getElementById('app');
+  const refreshBtn = document.getElementById('refreshBtn');
+
+  if (isManual) {
+    refreshBtn.classList.add('spinning');
+  }
+
   try {
-    const res = await fetch('/data/dashboard.json?_=' + Date.now());
+    const res = await fetch(`${basePath}/data/dashboard.json?_=${Date.now()}`);
     const data = await res.json();
-    document.getElementById('updated').textContent = '最後更新：' + (data.generated_at_local || '—');
-    document.getElementById('interval').textContent = (data.meta && data.meta.interval_min) ? data.meta.interval_min : '—';
-    const app = document.getElementById('app');
+
+    document.getElementById('updated').textContent =
+      '最後更新：' + (data.generated_at_local || '—');
+
+    app.classList.remove('loading');
     app.innerHTML = '';
+
     const order = Object.keys(data.tickers || {});
     for (const tk of order) {
       const d = data.tickers[tk];
-      const px = d.price && d.price.price != null ? d.price.price.toLocaleString() : '—';
+      const px = d.price && d.price.price != null ? d.price.price : null;
+      const pxDisplay = px != null ? px.toLocaleString() : '—';
       const curr = d.price && d.price.currency ? d.price.currency : '';
       const ex = d.price && d.price.exchange ? d.price.exchange : '';
+
+      // Price change indicator
+      let changeIndicator = '';
+      if (previousData[tk] && px != null && previousData[tk].price != null) {
+        const prevPx = previousData[tk].price;
+        if (px > prevPx) {
+          changeIndicator = '<span class="price-change up">▲</span>';
+        } else if (px < prevPx) {
+          changeIndicator = '<span class="price-change down">▼</span>';
+        }
+      }
+
       const card = document.createElement('section');
-      card.className = 'card';
+      card.className = 'card fade-in';
       card.innerHTML = `
         <div class="row">
           <h2>${tk}</h2>
           <div class="ex">${ex}</div>
         </div>
-        <div class="price">${px}<span class="ccy">${curr}</span></div>
+        <div class="price-wrapper">
+          <div class="price">${pxDisplay}<span class="ccy">${curr}</span></div>
+          ${changeIndicator}
+        </div>
         <ul class="news">
           ${(d.news||[]).map(n => `
             <li>
@@ -48,13 +112,39 @@ async function loadData() {
         </ul>
       `;
       app.appendChild(card);
+
+      // Store current price for next comparison
+      if (px != null) {
+        previousData[tk] = { price: px };
+      }
     }
+
+    // Set next update time
+    nextUpdateTime = Date.now() + INTERVAL_MS;
+    if (countdownInterval) clearInterval(countdownInterval);
+    countdownInterval = setInterval(updateCountdown, 1000);
+    updateCountdown();
+
   } catch (e) {
-    document.getElementById('updated').textContent = '載入失敗：' + e;
+    document.getElementById('updated').textContent = '載入失敗：' + e.message;
+    app.classList.remove('loading');
+    app.innerHTML = '<div class="error">資料載入失敗，請稍後重試</div>';
+  } finally {
+    if (isManual) {
+      setTimeout(() => refreshBtn.classList.remove('spinning'), 500);
+    }
   }
 }
+
+async function manualRefresh() {
+  await loadData(true);
+}
+
+// Initial load
 loadData();
-setInterval(loadData, 60000);
+
+// Auto refresh every 10 minutes
+setInterval(loadData, INTERVAL_MS);
 </script>
 </body>
 </html>
