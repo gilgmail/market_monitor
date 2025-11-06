@@ -1,6 +1,7 @@
 \
 # -*- coding: utf-8 -*-
 import os, json, time, asyncio, datetime, math, csv, io
+import email.utils as email_utils
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from fastapi import FastAPI
@@ -33,7 +34,14 @@ STATIC_DIR = APP_DIR / "static"
 
 DATA_DIR.mkdir(exist_ok=True, parents=True)
 
-UPDATE_INTERVAL_MIN = int(os.getenv("UPDATE_INTERVAL_MIN", "10"))
+# Update cadence configuration
+if "DATA_UPDATE_INTERVAL_SEC" in os.environ:
+    DATA_UPDATE_INTERVAL_SEC = max(15, int(os.getenv("DATA_UPDATE_INTERVAL_SEC", "60")))
+else:
+    DATA_UPDATE_INTERVAL_SEC = max(15, int(os.getenv("UPDATE_INTERVAL_MIN", "1")) * 60)
+
+AI_UPDATE_INTERVAL_SEC = max(3600, int(float(os.getenv("AI_UPDATE_INTERVAL_HOURS", "24")) * 3600))
+
 TICKERS = [t.strip() for t in os.getenv("TICKERS", "NVDA,SMCI,QQQ").split(",") if t.strip()]
 NEWS_PER_TICKER = int(os.getenv("NEWS_PER_TICKER", "12"))
 HISTORY_DAYS = int(os.getenv("HISTORY_DAYS", "30"))
@@ -41,6 +49,43 @@ TZ = os.getenv("TZ", "Asia/Taipei")
 UA = "Mozilla/5.0 (compatible; MarketMonitorBot/1.0)"
 JSON_PATH = DATA_DIR / "dashboard.json"
 STOOQ_CACHE: Dict[str, List[Dict[str, Any]]] = {}
+AI_CACHE_PATH = DATA_DIR / "ai_analysis.json"
+DATA_LOCK = asyncio.Lock()
+
+
+def load_ai_cache() -> Dict[str, Any]:
+    if AI_CACHE_PATH.exists():
+        try:
+            cache = json.loads(AI_CACHE_PATH.read_text(encoding="utf-8"))
+            cache.setdefault("generated_at_unix", 0)
+            cache.setdefault("generated_at_local", None)
+            cache.setdefault("tickers", {})
+            cache.setdefault("total_runs", 0)
+            return cache
+        except Exception:
+            pass
+    return {
+        "generated_at_unix": 0,
+        "generated_at_local": None,
+        "total_runs": 0,
+        "tickers": {}
+    }
+
+
+def save_ai_cache(cache: Dict[str, Any]) -> None:
+    AI_CACHE_PATH.parent.mkdir(exist_ok=True, parents=True)
+    AI_CACHE_PATH.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def default_ai_analysis() -> Dict[str, Any]:
+    return {
+        "summary": "AI 分析尚未產生",
+        "trend": "neutral",
+        "key_points": [],
+        "generated_at_unix": None,
+        "generated_at_local": None,
+        "run_count": 0
+    }
 
 # AI Provider Configuration
 AI_PROVIDER = os.getenv("AI_PROVIDER", "openai").lower()  # openai, anthropic, or none
@@ -286,6 +331,17 @@ async def collect_headlines_for(ticker: str) -> List[Dict[str, Any]]:
             title = e.get("title", "").strip()
             link = e.get("link", "").strip()
             published = e.get("published", "") or e.get("updated", "")
+            published_parsed = e.get("published_parsed") or e.get("updated_parsed")
+            if published_parsed:
+                try:
+                    published_ts = int(time.mktime(published_parsed))
+                except Exception:
+                    published_ts = 0
+            else:
+                try:
+                    published_ts = int(time.mktime(email_utils.parsedate(published))) if published else 0
+                except Exception:
+                    published_ts = 0
             if not title or not link:
                 continue
             key = (title, link)
@@ -296,8 +352,10 @@ async def collect_headlines_for(ticker: str) -> List[Dict[str, Any]]:
                 "title": title,
                 "link": link,
                 "published": published,
+                "published_ts": published_ts,
                 "source": e.get("source", {}).get("title") if isinstance(e.get("source", {}), dict) else None
             })
+    items.sort(key=lambda x: x.get("published_ts", 0), reverse=True)
     return items[:NEWS_PER_TICKER]
 
 async def generate_ai_analysis(ticker: str, history_data: Dict[str, Any], news_items: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -401,48 +459,112 @@ async def generate_ai_analysis(ticker: str, history_data: Dict[str, Any], news_i
             "key_points": []
         }
 
-async def build_json():
+async def build_snapshot(run_ai: bool = False) -> Dict[str, Any]:
     STOOQ_CACHE.clear()
-    data = {
-        "generated_at_unix": now_ts(),
-        "generated_at_local": now_iso_tz(),
+    ai_cache = load_ai_cache()
+    tickers_ai = ai_cache.setdefault("tickers", {})
+
+    current_total_runs = int(ai_cache.get("total_runs", 0))
+    next_total_runs = current_total_runs + 1 if run_ai else current_total_runs
+
+    generated_at_unix = now_ts()
+    generated_at_local = now_iso_tz()
+
+    data: Dict[str, Any] = {
+        "generated_at_unix": generated_at_unix,
+        "generated_at_local": generated_at_local,
         "tickers": {},
-        "meta": {"interval_min": UPDATE_INTERVAL_MIN, "tz": TZ, "history_days": HISTORY_DAYS}
+        "meta": {
+            "interval_min": round(DATA_UPDATE_INTERVAL_SEC / 60, 2),
+            "data_interval_sec": DATA_UPDATE_INTERVAL_SEC,
+            "ai_interval_hours": round(AI_UPDATE_INTERVAL_SEC / 3600, 2),
+            "tz": TZ,
+            "history_days": HISTORY_DAYS,
+            "ai_last_generated_local": ai_cache.get("generated_at_local"),
+            "ai_last_generated_unix": ai_cache.get("generated_at_unix"),
+            "ai_total_runs": next_total_runs,
+            "ai_total_ticker_runs": 0,  # will update after loop
+        }
     }
 
-    for t in TICKERS:
-        price_summary = fetch_price_summary(t)
-        price_history = fetch_price_history(t, HISTORY_DAYS)
-        news_items = await collect_headlines_for(t)
+    for ticker in TICKERS:
+        price_summary = fetch_price_summary(ticker)
+        price_history = fetch_price_history(ticker, HISTORY_DAYS)
+        news_items = await collect_headlines_for(ticker)
 
-        # 生成 AI 分析
-        ai_analysis = await generate_ai_analysis(t, price_history, news_items)
+        ai_details = tickers_ai.get(ticker)
 
-        data["tickers"][t] = {
+        if run_ai:
+            analysis = await generate_ai_analysis(ticker, price_history, news_items) or {}
+            previous_runs = int((ai_details or {}).get("run_count", 0))
+            ai_details = {
+                **default_ai_analysis(),
+                **analysis,
+                "generated_at_unix": generated_at_unix,
+                "generated_at_local": generated_at_local,
+                "run_count": previous_runs + 1,
+            }
+            tickers_ai[ticker] = ai_details
+        else:
+            if not ai_details:
+                ai_details = default_ai_analysis()
+            else:
+                ai_details.setdefault("run_count", 0)
+
+        data["tickers"][ticker] = {
             "price": price_summary,
             "history": price_history,
             "news": news_items,
-            "ai_analysis": ai_analysis
+            "ai_analysis": ai_details
         }
+
+    total_ticker_runs = sum(int(details.get("run_count", 0)) for details in tickers_ai.values())
+    data["meta"]["ai_total_ticker_runs"] = total_ticker_runs
+
+    if run_ai:
+        ai_cache["generated_at_unix"] = generated_at_unix
+        ai_cache["generated_at_local"] = generated_at_local
+        ai_cache["total_runs"] = next_total_runs
+        save_ai_cache(ai_cache)
 
     JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
     JSON_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     return data
 
-async def refresher_loop():
-    if not JSON_PATH.exists():
-        await build_json()
+async def data_refresher_loop():
     while True:
         try:
-            await build_json()
+            async with DATA_LOCK:
+                await build_snapshot(run_ai=False)
         except Exception as e:
-            err = {"generated_at_unix": now_ts(),"generated_at_local": now_iso_tz(),"error": str(e)}
+            err = {
+                "generated_at_unix": now_ts(),
+                "generated_at_local": now_iso_tz(),
+                "error": f"data_refresh_failed: {e}"
+            }
             JSON_PATH.write_text(json.dumps(err, ensure_ascii=False, indent=2), encoding="utf-8")
-        await asyncio.sleep(UPDATE_INTERVAL_MIN * 60)
+        await asyncio.sleep(DATA_UPDATE_INTERVAL_SEC)
+
+
+async def ai_refresher_loop():
+    while True:
+        try:
+            cache = load_ai_cache()
+            last_ts = cache.get("generated_at_unix") or 0
+            if last_ts == 0 or (now_ts() - last_ts) >= AI_UPDATE_INTERVAL_SEC:
+                async with DATA_LOCK:
+                    await build_snapshot(run_ai=True)
+        except Exception as e:
+            print(f"[ai_refresher_loop] AI refresh failed: {e}")
+        await asyncio.sleep(max(60, DATA_UPDATE_INTERVAL_SEC))
 
 @app.on_event("startup")
 async def on_start():
-    asyncio.create_task(refresher_loop())
+    async with DATA_LOCK:
+        if not JSON_PATH.exists():
+            await build_snapshot(run_ai=False)
+    asyncio.create_task(data_refresher_loop())
+    asyncio.create_task(ai_refresher_loop())
 
 @app.get("/", response_class=HTMLResponse)
 def index():
@@ -454,6 +576,20 @@ def data_json():
     if JSON_PATH.exists():
         return JSONResponse(content=json.loads(JSON_PATH.read_text(encoding="utf-8")))
     return JSONResponse(content={"status":"initializing"}, status_code=202)
+
+
+@app.post("/trigger/ai")
+async def trigger_ai_refresh():
+    async with DATA_LOCK:
+        data = await build_snapshot(run_ai=True)
+    meta = data.get("meta", {})
+    return JSONResponse(content={
+        "status": "ok",
+        "ai_generated_at_local": meta.get("ai_last_generated_local"),
+        "ai_generated_at_unix": meta.get("ai_last_generated_unix"),
+        "ai_total_runs": meta.get("ai_total_runs"),
+        "ai_total_ticker_runs": meta.get("ai_total_ticker_runs"),
+    })
 
 if __name__ == "__main__":
     import uvicorn

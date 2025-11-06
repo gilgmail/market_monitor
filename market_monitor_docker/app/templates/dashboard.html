@@ -12,32 +12,91 @@
   <h1>市場監控面板 <span>NVDA / SMCI / QQQ</span></h1>
   <div class="header-info">
     <div class="updated" id="updated">載入中…</div>
-    <button class="refresh-btn" id="refreshBtn" onclick="manualRefresh()" title="手動更新">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M13.65 2.35C12.2 0.9 10.21 0 8 0 3.58 0 0.01 3.58 0.01 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L9 7h7V0l-2.35 2.35z"/>
-      </svg>
-    </button>
+    <div class="actions">
+      <button class="refresh-btn" id="refreshBtn" onclick="manualRefresh()" title="手動更新資料">
+        <span class="btn-icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M13.65 2.35C12.2 0.9 10.21 0 8 0 3.58 0 0.01 3.58 0.01 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L9 7h7V0l-2.35 2.35z"/>
+          </svg>
+        </span>
+        <span>更新資料</span>
+      </button>
+      <button class="refresh-btn ai-btn" id="aiRefreshBtn" onclick="triggerAIRefresh()" title="重新產生 AI 分析">
+        <span class="btn-icon">🤖</span>
+        <span>AI 分析</span>
+      </button>
+    </div>
   </div>
   <div class="countdown-bar">
     <div class="countdown-progress" id="countdownProgress"></div>
   </div>
-  <div class="next-update" id="nextUpdate">下次更新：計算中…</div>
+  <div class="schedule-info">
+    <div class="next-update" id="nextUpdate">下次更新：計算中…</div>
+    <div class="ai-status" id="aiStatus">AI 更新：載入中…</div>
+  </div>
 </header>
 <main id="app" class="loading">
   <div class="spinner"></div>
 </main>
 <footer class="ft">
-  由 FastAPI 提供資料，背景每 <strong>10</strong> 分鐘更新。資料源：yfinance、Google News RSS。
+  由 FastAPI 提供資料，背景更新頻率：<strong id="dataIntervalLabel">1 分鐘</strong>。資料源：Stooq、Google News RSS。
 </footer>
 <script>
 const basePath = window.location.pathname.replace(/\/$/, '');
-const INTERVAL_MS = 600000; // 10 minutes
+let INTERVAL_MS = 60000;
+let autoRefreshTimer = null;
 let nextUpdateTime = null;
 let countdownInterval = null;
 let previousData = {};
 
+function restartAutoRefresh() {
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer);
+  }
+  autoRefreshTimer = setInterval(() => {
+    loadData().catch(() => {});
+  }, INTERVAL_MS);
+}
+
+function setAiStatus(text) {
+  const el = document.getElementById('aiStatus');
+  if (el) {
+    el.textContent = text;
+  }
+}
+
+function applyMeta(meta = {}) {
+  const sec = meta.data_interval_sec ?? (meta.interval_min ? meta.interval_min * 60 : null);
+  if (sec) {
+    const newMs = sec * 1000;
+    const intervalChanged = newMs !== INTERVAL_MS;
+    INTERVAL_MS = newMs;
+    if (intervalChanged || autoRefreshTimer === null) {
+      restartAutoRefresh();
+    }
+    const label = document.getElementById('dataIntervalLabel');
+    if (label) {
+      if (sec >= 60) {
+        const minutes = sec / 60;
+        label.textContent = `${minutes % 1 === 0 ? minutes.toFixed(0) : minutes.toFixed(1)} 分鐘`;
+      } else {
+        label.textContent = `${sec} 秒`;
+      }
+    }
+  }
+
+  const lastAI = meta.ai_last_generated_local;
+  const runCount = meta.ai_total_runs ?? 0;
+  const tickerCount = meta.ai_total_ticker_runs ?? 0;
+  const detail =
+    runCount > 0
+      ? `（總更新 ${runCount.toLocaleString()} 次 / 呼叫 ${tickerCount.toLocaleString()} 次）`
+      : '（尚未使用）';
+  setAiStatus(`AI 更新：${lastAI || '尚未產生'} ${detail}`);
+}
+
 function updateCountdown() {
-  if (!nextUpdateTime) return;
+  if (!nextUpdateTime || INTERVAL_MS <= 0) return;
   const now = Date.now();
   const remaining = Math.max(0, nextUpdateTime - now);
   const seconds = Math.floor(remaining / 1000);
@@ -60,12 +119,13 @@ async function loadData(isManual = false) {
   const refreshBtn = document.getElementById('refreshBtn');
 
   if (isManual) {
-    refreshBtn.classList.add('spinning');
+    refreshBtn?.classList.add('spinning');
   }
 
   try {
     const res = await fetch(`${basePath}/data/dashboard.json?_=${Date.now()}`);
     const data = await res.json();
+    applyMeta(data.meta || {});
 
     document.getElementById('updated').textContent =
       '最後更新：' + (data.generated_at_local || '—');
@@ -256,7 +316,7 @@ async function loadData(isManual = false) {
     app.classList.remove('loading');
     app.innerHTML = '<div class="error">資料載入失敗，請稍後重試</div>';
   } finally {
-    if (isManual) {
+    if (isManual && refreshBtn) {
       setTimeout(() => refreshBtn.classList.remove('spinning'), 500);
     }
   }
@@ -266,11 +326,36 @@ async function manualRefresh() {
   await loadData(true);
 }
 
+async function triggerAIRefresh() {
+  const btn = document.getElementById('aiRefreshBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('spinning');
+  }
+  setAiStatus('AI 更新：生成中…');
+  try {
+    const res = await fetch(`${basePath}/trigger/ai`, { method: 'POST' });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    await res.json();
+    await loadData();
+  } catch (e) {
+    setAiStatus('AI 更新：失敗，請稍後重試');
+    alert('AI 分析更新失敗：' + e.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      setTimeout(() => btn.classList.remove('spinning'), 300);
+    }
+  }
+}
+
 // Initial load
 loadData();
 
-// Auto refresh every 10 minutes
-setInterval(loadData, INTERVAL_MS);
+// Ensure auto refresh is scheduled after first metadata sync
+restartAutoRefresh();
 </script>
 </body>
 </html>

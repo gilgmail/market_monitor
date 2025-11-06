@@ -5,7 +5,7 @@
 ## ✨ 功能特色
 
 ### 📊 股價監控
-- **即時價格更新** - 每 10 分鐘自動更新
+- **即時價格更新** - 每分鐘自動更新（可自訂頻率）
 - **30天歷史圖表** - Chart.js 互動式折線圖
 - **關鍵統計數據** - 日變化、30天高低點
 - **價格變動指標** - 綠色▲上漲 / 紅色▼下跌
@@ -14,12 +14,13 @@
 - **多 AI 引擎支援** - 支援 OpenAI GPT 和 Anthropic Claude（可選擇）
 - **趨勢判斷** - AI 分析市場趨勢（看漲/看跌/中性）
 - **關鍵要點提取** - AI 自動總結 3-5 個重要市場動態
-- **每 10 分鐘更新** - 隨股價數據同步更新 AI 分析
+- **每日更新 + 手動觸發** - 預設每日自動產生，亦可手動刷新 AI 分析
+- **使用統計** - 儀表板顯示 AI 分析總觸發次數，掌握 API 用量
 
 ### 📰 新聞追蹤
 - **Google News 整合** - 自動抓取相關市場新聞
 - **多來源聚合** - 涵蓋財報、產業動態、市場分析
-- **即時更新** - 與價格數據同步
+- **快速更新** - 與股價同步，每分鐘整理一次並依發佈時間排序
 
 ### 🎨 現代化界面
 - **深色主題** - 專業金融面板風格
@@ -93,7 +94,9 @@ http://localhost:8090
 | `OPENAI_API_KEY` | - | OpenAI API 金鑰（當 `AI_PROVIDER=openai` 時需要） |
 | `ANTHROPIC_API_KEY` | - | Anthropic API 金鑰（當 `AI_PROVIDER=anthropic` 時需要） |
 | `TZ` | `Asia/Taipei` | 時區設定 |
-| `UPDATE_INTERVAL_MIN` | `10` | 數據更新間隔（分鐘） |
+| `DATA_UPDATE_INTERVAL_SEC` | `60` | 股價與新聞更新間隔（秒） |
+| `AI_UPDATE_INTERVAL_HOURS` | `24` | AI 分析自動更新間隔（小時） |
+| `UPDATE_INTERVAL_MIN` | `1` | （Legacy）舊版分鐘制設定，與 `DATA_UPDATE_INTERVAL_SEC` 相容 |
 | `TICKERS` | `NVDA,SMCI,QQQ` | 監控股票代碼（逗號分隔） |
 | `NEWS_PER_TICKER` | `12` | 每支股票新聞數量 |
 | `HISTORY_DAYS` | `30` | 歷史數據天數 |
@@ -141,7 +144,13 @@ market_monitor_docker/
 
 ## 🔄 更新日誌
 
-### v2.1.0 (最新)
+### v2.2.0
+- ✅ 股價與新聞預設每分鐘更新，可自訂更新頻率
+- ✅ AI 分析每日自動更新，並支援手動立即重新生成
+- ✅ 新聞清單依發佈時間由新到舊排序
+- ✅ 儀表板顯示 AI 分析累計使用次數與呼叫量
+
+### v2.1.0
 - ✅ 新增 OpenAI GPT 支援（預設使用 `gpt-4o-mini`）
 - ✅ AI 引擎可選擇（OpenAI / Anthropic / None）
 - ✅ 改進 AI 分析錯誤處理
