@@ -9,6 +9,10 @@ services:
       - UPDATE_INTERVAL_MIN=10
       - TICKERS=NVDA,SMCI,QQQ
       - NEWS_PER_TICKER=12
+      - HISTORY_DAYS=30
+      - AI_PROVIDER=${AI_PROVIDER:-openai}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     ports:
       - "8090:8088"
     volumes:

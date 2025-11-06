@@ -318,6 +318,132 @@ main.loading {
   font-weight: 600;
 }
 
+/* Chart Container */
+.chart-container {
+  margin: 16px 0;
+  height: 200px;
+  position: relative;
+}
+
+/* Stats Row */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.stat {
+  background: rgba(154, 164, 178, 0.05);
+  padding: 10px;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.stat-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.stat-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.stat-value.positive {
+  color: var(--green);
+}
+
+.stat-value.negative {
+  color: var(--red);
+}
+
+/* AI Analysis */
+.ai-analysis {
+  background: rgba(78, 161, 255, 0.05);
+  border: 1px solid rgba(78, 161, 255, 0.2);
+  border-radius: 10px;
+  padding: 14px;
+  margin: 14px 0;
+  transition: all 0.3s ease;
+}
+
+.ai-analysis.bullish {
+  background: rgba(61, 214, 140, 0.05);
+  border-color: rgba(61, 214, 140, 0.3);
+}
+
+.ai-analysis.bearish {
+  background: rgba(255, 71, 87, 0.05);
+  border-color: rgba(255, 71, 87, 0.3);
+}
+
+.ai-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.ai-icon {
+  font-size: 18px;
+}
+
+.ai-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ai-analysis.bullish .ai-title {
+  color: var(--green);
+}
+
+.ai-analysis.bearish .ai-title {
+  color: var(--red);
+}
+
+.ai-summary {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+
+.ai-points {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.ai-points li {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted);
+  padding: 6px 0 6px 20px;
+  position: relative;
+}
+
+.ai-points li::before {
+  content: '•';
+  position: absolute;
+  left: 8px;
+  color: var(--accent);
+  font-weight: bold;
+}
+
+.ai-analysis.bullish .ai-points li::before {
+  color: var(--green);
+}
+
+.ai-analysis.bearish .ai-points li::before {
+  color: var(--red);
+}
+
 @media (max-width: 768px) {
   main {
     grid-template-columns: 1fr;
@@ -339,5 +465,14 @@ main.loading {
 
   .refresh-btn {
     align-self: flex-end;
+  }
+
+  .stats-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .chart-container {
+    height: 180px;
   }
 }

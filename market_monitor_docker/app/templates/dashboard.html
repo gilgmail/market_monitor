@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>市場監控面板 — NVDA / SMCI / QQQ</title>
   <link rel="stylesheet" href="static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
 <header class="hd">
@@ -91,8 +92,20 @@ async function loadData(isManual = false) {
         }
       }
 
+      // AI Analysis
+      const ai = d.ai_analysis || {};
+      const trendClass = ai.trend === 'bullish' ? 'bullish' : ai.trend === 'bearish' ? 'bearish' : 'neutral';
+      const trendIcon = ai.trend === 'bullish' ? '📈' : ai.trend === 'bearish' ? '📉' : '➡️';
+
+      // Stats
+      const stats = d.history?.stats || {};
+      const changePct = stats.change_percent || 0;
+      const changePctClass = changePct > 0 ? 'positive' : changePct < 0 ? 'negative' : '';
+
       const card = document.createElement('section');
       card.className = 'card fade-in';
+      const chartId = `chart-${tk}`;
+
       card.innerHTML = `
         <div class="row">
           <h2>${tk}</h2>
@@ -102,6 +115,45 @@ async function loadData(isManual = false) {
           <div class="price">${pxDisplay}<span class="ccy">${curr}</span></div>
           ${changeIndicator}
         </div>
+
+        ${stats.change_percent != null ? `
+          <div class="stats-row">
+            <div class="stat">
+              <div class="stat-label">日變化</div>
+              <div class="stat-value ${changePctClass}">${changePct > 0 ? '+' : ''}${changePct}%</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">30天高點</div>
+              <div class="stat-value">${stats.high_30d ? stats.high_30d.toLocaleString() : '—'}</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">30天低點</div>
+              <div class="stat-value">${stats.low_30d ? stats.low_30d.toLocaleString() : '—'}</div>
+            </div>
+          </div>
+        ` : ''}
+
+        ${d.history && d.history.dates && d.history.dates.length > 0 ? `
+          <div class="chart-container">
+            <canvas id="${chartId}"></canvas>
+          </div>
+        ` : ''}
+
+        ${ai.summary ? `
+          <div class="ai-analysis ${trendClass}">
+            <div class="ai-header">
+              <span class="ai-icon">${trendIcon}</span>
+              <span class="ai-title">AI 分析</span>
+            </div>
+            <div class="ai-summary">${ai.summary}</div>
+            ${ai.key_points && ai.key_points.length > 0 ? `
+              <ul class="ai-points">
+                ${ai.key_points.map(p => `<li>${p}</li>`).join('')}
+              </ul>
+            ` : ''}
+          </div>
+        ` : ''}
+
         <ul class="news">
           ${(d.news||[]).map(n => `
             <li>
@@ -112,6 +164,80 @@ async function loadData(isManual = false) {
         </ul>
       `;
       app.appendChild(card);
+
+      // Create chart if data exists
+      if (d.history && d.history.dates && d.history.dates.length > 0) {
+        const ctx = document.getElementById(chartId);
+        if (ctx) {
+          const gradient = ctx.getContext('2d').createLinearGradient(0, 0, 0, 200);
+          gradient.addColorStop(0, 'rgba(78, 161, 255, 0.3)');
+          gradient.addColorStop(1, 'rgba(78, 161, 255, 0)');
+
+          new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels: d.history.dates,
+              datasets: [{
+                label: '收盤價',
+                data: d.history.prices,
+                borderColor: '#4ea1ff',
+                backgroundColor: gradient,
+                borderWidth: 2,
+                fill: true,
+                tension: 0.4,
+                pointRadius: 0,
+                pointHoverRadius: 5,
+                pointHoverBackgroundColor: '#4ea1ff',
+                pointHoverBorderColor: '#fff',
+                pointHoverBorderWidth: 2
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              interaction: {
+                intersect: false,
+                mode: 'index'
+              },
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  backgroundColor: 'rgba(22, 26, 34, 0.95)',
+                  titleColor: '#e7e9ee',
+                  bodyColor: '#e7e9ee',
+                  borderColor: '#4ea1ff',
+                  borderWidth: 1,
+                  padding: 10,
+                  displayColors: false,
+                  callbacks: {
+                    label: (context) => `${context.parsed.y.toLocaleString()} ${curr}`
+                  }
+                }
+              },
+              scales: {
+                x: {
+                  display: true,
+                  grid: { color: '#232a3a', drawBorder: false },
+                  ticks: {
+                    color: '#9aa4b2',
+                    maxTicksLimit: 6,
+                    font: { size: 10 }
+                  }
+                },
+                y: {
+                  display: true,
+                  grid: { color: '#232a3a', drawBorder: false },
+                  ticks: {
+                    color: '#9aa4b2',
+                    font: { size: 10 },
+                    callback: (value) => value.toLocaleString()
+                  }
+                }
+              }
+            }
+          });
+        }
+      }
 
       // Store current price for next comparison
       if (px != null) {
